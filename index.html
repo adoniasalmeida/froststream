@@ -351,15 +351,18 @@ select option{background:#0e0e1c;}
 const BASE_ORIGIN = 'https://froststream.up.railway.app';
 
 // Public CORS proxies — tried in order until one works
+// corsproxy.io: free, explicitly supports github.io, 60 rpm limit
+// allorigins.win: free fallback, no strict rate limit
+// corsproxy.dev: open-source, self-hostable, used here as public instance
 const PROXIES = [
   url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://cors-anywhere.herokuapp.com/${url}`,
+  url => `https://corsproxy.dev/?url=${encodeURIComponent(url)}`,
 ];
 
 let workingProxyIdx = 0; // cached index of last working proxy
 
-const PROXY_NAMES = ['corsproxy.io', 'allorigins.win', 'cors-anywhere'];
+const PROXY_NAMES = ['corsproxy.io', 'allorigins.win', 'corsproxy.dev'];
 
 async function proxyFetch(path) {
   const targetUrl = `${BASE_ORIGIN}${path}`;
@@ -562,6 +565,7 @@ async function processItem(item,type,apiKey){
       status:detail.status||'',
       cast:(detail.credits?.cast||[]).slice(0,5).map(c=>c.name),
       trailerKey,imdb,type,seasonCount,seasons,
+      tmdbId: item.id,       // numeric TMDB ID — needed for season/episode endpoint
       currentSeason:1,currentEp:1,
     };
 
@@ -667,20 +671,18 @@ async function buildTvPicker(containerId, meta, onLoad) {
   async function loadEpisodes(seasonNum) {
     epSel.innerHTML = '<option>Carregando...</option>';
     epName.textContent = '';
-    const cacheKey = `${meta.imdb}_s${seasonNum}`;
+    const cacheKey = `${meta.tmdbId}_s${seasonNum}`;
     let eps = tvSeasonCache[cacheKey];
     if(!eps) {
       try {
-        const d = await fetch(`https://api.themoviedb.org/3/tv/${meta.imdb.replace('tt','')}?api_key=${apiKey}&language=pt-BR&append_to_response=season/${seasonNum}`).then(r=>r.json());
-        // Try alternate approach for episode list
-        const sd = await fetch(`https://api.themoviedb.org/3/tv/find/${meta.imdb}?api_key=${apiKey}&external_source=imdb_id&language=pt-BR`).then(r=>r.json());
-        // fetch season directly
-        const seasonData = await fetch(`https://api.themoviedb.org/3/tv/${d.id||meta.imdb}?api_key=${apiKey}&language=pt-BR`).then(r=>r.json());
-        const sDetail = await fetch(`https://api.themoviedb.org/3/tv/${seasonData.id}/season/${seasonNum}?api_key=${apiKey}&language=pt-BR`).then(r=>r.json());
-        eps = (sDetail.episodes||[]).map(e=>({num:e.episode_number,name:e.name}));
-      } catch(e) { eps=[]; }
-      // Fallback: generate 1..24 if no data
-      if(!eps.length) eps = Array.from({length:24},(_,i)=>({num:i+1,name:`Episódio ${i+1}`}));
+        // Single direct call using numeric TMDB ID
+        const sDetail = await fetch(
+          `https://api.themoviedb.org/3/tv/${meta.tmdbId}/season/${seasonNum}?api_key=${apiKey}&language=pt-BR`
+        ).then(r => r.json());
+        eps = (sDetail.episodes || []).map(e => ({ num: e.episode_number, name: e.name || `Episódio ${e.episode_number}` }));
+      } catch(e) { eps = []; }
+      // Fallback: numbered list if API returned nothing
+      if(!eps.length) eps = Array.from({length:24}, (_,i) => ({ num:i+1, name:`Episódio ${i+1}` }));
       tvSeasonCache[cacheKey] = eps;
     }
     epSel.innerHTML = '';
