@@ -348,7 +348,60 @@ select option{background:#0e0e1c;}
 </div>
 
 <script>
-const BASE = 'https://froststream.up.railway.app';
+const BASE_ORIGIN = 'https://froststream.up.railway.app';
+
+// Public CORS proxies — tried in order until one works
+const PROXIES = [
+  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://cors-anywhere.herokuapp.com/${url}`,
+];
+
+let workingProxyIdx = 0; // cached index of last working proxy
+
+const PROXY_NAMES = ['corsproxy.io', 'allorigins.win', 'cors-anywhere'];
+
+async function proxyFetch(path) {
+  const targetUrl = `${BASE_ORIGIN}${path}`;
+
+  const order = [
+    workingProxyIdx,
+    ...PROXIES.map((_,i)=>i).filter(i=>i!==workingProxyIdx)
+  ];
+
+  for (const i of order) {
+    try {
+      const proxied = PROXIES[i](targetUrl);
+      const res = await fetch(proxied, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (res.ok) {
+        if(workingProxyIdx !== i) {
+          workingProxyIdx = i;
+          setProxyBadge(PROXY_NAMES[i]);
+        }
+        return res;
+      }
+    } catch(_) { /* try next */ }
+  }
+
+  return fetch(targetUrl);
+}
+
+function setProxyBadge(name) {
+  let badge = document.getElementById('proxyBadge');
+  if(!badge) {
+    badge = document.createElement('span');
+    badge.id = 'proxyBadge';
+    badge.style.cssText = `
+      font-family:'VT323',monospace;font-size:12px;letter-spacing:1px;
+      color:#000;background:var(--yellow);padding:1px 8px;margin-left:10px;
+    `;
+    document.getElementById('status')?.after(badge);
+  }
+  badge.textContent = `via ${name}`;
+}
 let zip = new JSZip();
 let found = [];           // all fetched results
 let renderQueue = [];     // pending cards to show
@@ -480,8 +533,8 @@ async function processItem(item,type,apiKey){
     ]);
     const imdb=ids.imdb_id;
     if(!imdb)return;
-    const endpoint=type==='movie'?`${BASE}/stream/movie/${imdb}.json`:`${BASE}/stream/series/${imdb}:1:1.json`;
-    const sRes=await fetch(endpoint);
+    const path=type==='movie'?`/stream/movie/${imdb}.json`:`/stream/series/${imdb}:1:1.json`;
+    const sRes=await proxyFetch(path);
     if(!sRes.ok)return;
     const streamData=await sRes.json();
     if(!streamData.streams?.length)return;
@@ -748,8 +801,8 @@ async function reloadTvStreams(idx, sn, en, containerId, callback) {
   const apiKey = getApiKey();
   setStatus(`Buscando T${sn}E${en} de ${meta.title}...`);
   try {
-    const endpoint = `${BASE}/stream/series/${meta.imdb}:${sn}:${en}.json`;
-    const res = await fetch(endpoint);
+    const path = `/stream/series/${meta.imdb}:${sn}:${en}.json`;
+    const res = await proxyFetch(path);
     if(res.ok){
       const data = await res.json();
       if(data.streams?.length){
