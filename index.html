@@ -936,36 +936,10 @@ function guessFormat(url){
   return 'STREAM';
 }
 
-async function resolveUrl(url) {
-  // Try each proxy to follow redirects and get the final URL
-  // allorigins returns the final URL after redirects in the response URL
-  const proxyFns = [
-    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.dev/?url=${encodeURIComponent(u)}`,
-  ];
-
-  for (const fn of proxyFns) {
-    try {
-      const res = await fetch(fn(url), {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        // If proxy returned a blob/data url or the response url differs, use it
-        const finalUrl = res.url;
-        // Strip proxy prefix to get real redirected URL if possible
-        if (finalUrl && !finalUrl.includes('corsproxy') && !finalUrl.includes('allorigins')) {
-          return finalUrl;
-        }
-        // Otherwise return proxied URL directly for the video tag
-        return fn(url);
-      }
-    } catch(_) {}
-  }
-
-  // Fallback: return original
-  return url;
+function getProxiedVideoUrl(url) {
+  // Route the video itself through corsproxy.io which strips Origin/Referer headers
+  // This makes the server think the request comes with no origin (like a direct browser bar request)
+  return `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
 }
 
 async function playSource(idx, url, name) {
@@ -975,58 +949,56 @@ async function playSource(idx, url, name) {
 
   const wrap = document.getElementById('playerWrap');
 
-  // Show loading state
   wrap.innerHTML = `
     <div class="player-placeholder">
       <span style="font-size:28px;animation:blink 1s step-end infinite">◈</span>
-      <span>Resolvendo stream...</span>
+      <span>Carregando stream...</span>
     </div>`;
 
-  // Resolve redirect to get final playable URL
-  let finalUrl = url;
-  try {
-    finalUrl = await resolveUrl(url);
-  } catch(_) { finalUrl = url; }
+  const isNative = /\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(url) || url.includes('m3u8');
+  const mime     = getVideoMime(url);
 
-  const isNative = /\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(finalUrl)
-    || finalUrl.includes('m3u8')
-    || /\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(url)
-    || url.includes('m3u8');
+  // Use proxied URL to bypass Origin/Referer blocking
+  const proxiedUrl = getProxiedVideoUrl(url);
 
   if (isNative) {
     wrap.innerHTML = `
-      <video controls autoplay style="width:100%;height:100%;background:#000">
-        <source src="${finalUrl}" type="${getVideoMime(finalUrl || url)}">
-        <source src="${url}" type="${getVideoMime(url)}">
-        <p style="color:#fff;padding:20px;font-family:'Share Tech Mono',monospace;font-size:11px">
-          Formato não suportado diretamente.
-          <a href="${url}" target="_blank" style="color:var(--cyan)">Abrir no navegador →</a>
-        </p>
+      <video id="mainVideo" controls autoplay style="width:100%;height:100%;background:#000">
+        <source src="${proxiedUrl}" type="${mime}">
+        <source src="${url}" type="${mime}">
       </video>`;
 
-    // If video errors out, show external link fallback
-    const video = wrap.querySelector('video');
+    const video = wrap.querySelector('#mainVideo');
     if (video) {
-      video.onerror = () => {
+      let fallbackShown = false;
+
+      const showFallback = () => {
+        if (fallbackShown) return;
+        fallbackShown = true;
         wrap.innerHTML = `
           <div class="player-placeholder">
             <span style="font-size:28px">🔗</span>
-            <span>Stream bloqueado pelo servidor</span>
+            <span style="font-size:13px;text-align:center;padding:0 20px">Servidor bloqueia reprodução embutida</span>
             <a href="${url}" target="_blank" rel="noopener"
-               style="color:var(--cyan);font-size:14px;margin-top:6px;font-family:'VT323',monospace;letter-spacing:2px">
-              ABRIR NO NAVEGADOR →
+               style="color:var(--cyan);font-size:16px;margin-top:8px;font-family:'VT323',monospace;letter-spacing:2px;text-decoration:none;">
+              ▶ ABRIR NO NAVEGADOR
             </a>
           </div>`;
       };
+
+      video.onerror = showFallback;
+      // If nothing loads in 10s, show fallback
+      setTimeout(() => { if(video.readyState === 0) showFallback(); }, 10000);
     }
   } else {
+    // Non-native format: just offer external link
     wrap.innerHTML = `
       <div class="player-placeholder">
         <span style="font-size:32px">🔗</span>
-        <span>Servidor requer abertura externa</span>
+        <span>Formato requer player externo</span>
         <a href="${url}" target="_blank" rel="noopener"
-           style="color:var(--cyan);font-size:14px;margin-top:6px;font-family:'VT323',monospace;letter-spacing:2px">
-          ABRIR ${name} →
+           style="color:var(--cyan);font-size:16px;margin-top:8px;font-family:'VT323',monospace;letter-spacing:2px;text-decoration:none;">
+          ▶ ABRIR NO NAVEGADOR
         </a>
       </div>`;
   }
