@@ -177,10 +177,63 @@ select option{background:#0e0e1c;}
 .trailer-icon-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:1px solid var(--pink);color:var(--pink);font-family:'VT323',monospace;font-size:17px;letter-spacing:2px;padding:8px 16px;margin-top:14px;width:100%;cursor:pointer;transition:background .2s,color .2s;text-decoration:none;}
 .trailer-icon-btn:hover{background:var(--pink);color:#fff;}
 
-/* ── PLAYER MODAL ── */
-.player-wrap{background:#000;width:100%;aspect-ratio:16/9;position:relative;}
-.player-wrap video{width:100%;height:100%;display:block;}
-.player-placeholder{width:100%;height:100%;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--dim);font-family:'VT323',monospace;font-size:17px;letter-spacing:2px;}
+/* ── SLIDESHOW ── */
+.slideshow {
+  position:relative; width:100%; aspect-ratio:16/9;
+  background:#000; overflow:hidden;
+}
+.slide {
+  position:absolute; inset:0;
+  background-size:cover; background-position:center;
+  opacity:0; transition:opacity .9s ease;
+}
+.slide.active { opacity:1; }
+.slide-overlay {
+  position:absolute; inset:0;
+  background:linear-gradient(to top, rgba(7,7,15,.85) 0%, transparent 50%);
+}
+.slide-info {
+  position:absolute; bottom:0; left:0; right:0;
+  padding:14px 18px;
+  display:flex; align-items:flex-end; justify-content:space-between; gap:10px;
+}
+.slide-title {
+  font-family:'Orbitron',monospace; font-weight:900;
+  font-size:clamp(13px,2vw,20px); color:#fff;
+  text-shadow:0 0 20px rgba(0,255,231,.4);
+  letter-spacing:2px; line-height:1.2;
+}
+.slide-meta {
+  font-family:'VT323',monospace; font-size:14px;
+  color:var(--dim); letter-spacing:2px; white-space:nowrap;
+}
+.slide-dots {
+  position:absolute; bottom:52px; left:50%;
+  transform:translateX(-50%);
+  display:flex; gap:5px;
+}
+.slide-dot {
+  width:6px; height:6px; border-radius:50%;
+  background:rgba(255,255,255,.3); cursor:pointer;
+  transition:background .3s, transform .3s;
+}
+.slide-dot.active { background:var(--cyan); transform:scale(1.3); }
+.slide-counter {
+  position:absolute; top:10px; right:12px;
+  font-family:'VT323',monospace; font-size:13px;
+  color:rgba(255,255,255,.4); letter-spacing:2px;
+}
+.slide-nav {
+  position:absolute; top:50%; transform:translateY(-50%);
+  background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.6); width:32px; height:32px;
+  cursor:pointer; font-size:16px; font-family:inherit;
+  display:flex; align-items:center; justify-content:center;
+  transition:background .2s, color .2s;
+}
+.slide-nav:hover { background:var(--cyan); color:#000; }
+.slide-nav.prev { left:10px; }
+.slide-nav.next { right:10px; }
 .source-list{padding:14px 18px;border-top:1px solid var(--border);}
 .source-label{font-family:'VT323',monospace;font-size:14px;letter-spacing:3px;color:var(--dim);margin-bottom:8px;}
 .source-item{display:flex;align-items:center;gap:8px;padding:9px 12px;margin-bottom:5px;background:var(--panel2);border:1px solid var(--border);cursor:pointer;transition:border-color .15s,background .15s;font-family:'VT323',monospace;font-size:16px;color:var(--dim);}
@@ -532,7 +585,7 @@ async function processItem(item,type,apiKey){
   try{
     const [ids,detail]=await Promise.all([
       fetch(`https://api.themoviedb.org/3/${type}/${item.id}/external_ids?api_key=${apiKey}`).then(r=>r.json()),
-      fetch(`https://api.themoviedb.org/3/${type}/${item.id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,videos`).then(r=>r.json())
+      fetch(`https://api.themoviedb.org/3/${type}/${item.id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,videos,images`).then(r=>r.json())
     ]);
     const imdb=ids.imdb_id;
     if(!imdb)return;
@@ -549,9 +602,20 @@ async function processItem(item,type,apiKey){
       videos.find(v=>v.site==='YouTube')
     )?.key||null;
 
-    // For TV: store season count so we can build selectors
     const seasonCount = type==='tv' ? (detail.number_of_seasons||1) : null;
     const seasons     = type==='tv' ? (detail.seasons||[]).filter(s=>s.season_number>0) : [];
+
+    // Collect slideshow images: backdrops + poster as fallback
+    const backdrops = (detail.images?.backdrops||[])
+      .slice(0,8)
+      .map(b=>`https://image.tmdb.org/t/p/w780${b.file_path}`);
+    const posters = (detail.images?.posters||[])
+      .slice(0,4)
+      .map(p=>`https://image.tmdb.org/t/p/w500${p.file_path}`);
+    // Mix backdrops first, then posters; ensure at least the main poster
+    let slides = [...backdrops, ...posters];
+    if(!slides.length && item.poster_path) slides = [`https://image.tmdb.org/t/p/w500${item.poster_path}`];
+    if(!slides.length && item.backdrop_path) slides = [`https://image.tmdb.org/t/p/w780${item.backdrop_path}`];
 
     streamData._meta={
       title:item.title||item.name||imdb,
@@ -564,8 +628,8 @@ async function processItem(item,type,apiKey){
       runtime:detail.runtime||detail.episode_run_time?.[0]||null,
       status:detail.status||'',
       cast:(detail.credits?.cast||[]).slice(0,5).map(c=>c.name),
-      trailerKey,imdb,type,seasonCount,seasons,
-      tmdbId: item.id,       // numeric TMDB ID — needed for season/episode endpoint
+      trailerKey,imdb,type,seasonCount,seasons,slides,
+      tmdbId:item.id,
       currentSeason:1,currentEp:1,
     };
 
@@ -871,21 +935,70 @@ function openInfoModal(idx) {
   document.getElementById('infoModal').style.display='flex';
 }
 
-/* ── PLAYER MODAL ── */
+/* ── PLAYER MODAL + SLIDESHOW ── */
+let slideshowTimer = null;
+let slideIdx = 0;
+
+function startSlideshow(slides, title, year, rating) {
+  const wrap = document.getElementById('playerWrap');
+  if (!slides || !slides.length) {
+    wrap.innerHTML = `<div style="width:100%;aspect-ratio:16/9;background:#0a0a18;display:flex;align-items:center;justify-content:center;font-family:'VT323',monospace;font-size:16px;color:var(--dim);letter-spacing:3px;">[ SEM IMAGENS ]</div>`;
+    return;
+  }
+  const dotsHtml = slides.length > 1
+    ? `<div class="slide-dots">${slides.map((_,i)=>`<div class="slide-dot${i===0?' active':''}" onclick="goSlide(${i})"></div>`).join('')}</div>`
+    : '';
+  const navHtml = slides.length > 1
+    ? `<button class="slide-nav prev" onclick="prevSlide()">‹</button><button class="slide-nav next" onclick="nextSlide()">›</button>`
+    : '';
+  wrap.innerHTML = `
+    <div class="slideshow" id="slideshow">
+      ${slides.map((src,i)=>`<div class="slide${i===0?' active':''}" id="slide-${i}" style="background-image:url('${src}')"><div class="slide-overlay"></div></div>`).join('')}
+      <div class="slide-info">
+        <div class="slide-title">${title}${year?` <span style="color:var(--dim);font-weight:400;font-size:.8em">(${year})</span>`:''}</div>
+        <div class="slide-meta">${rating!=='—'?`⭐ ${rating}`:''}</div>
+      </div>
+      ${dotsHtml}
+      ${slides.length>1?`<div class="slide-counter" id="slideCounter">1 / ${slides.length}</div>`:''}
+      ${navHtml}
+    </div>`;
+  slideIdx = 0;
+  clearInterval(slideshowTimer);
+  if (slides.length > 1) slideshowTimer = setInterval(nextSlide, 4000);
+}
+
+function goSlide(idx) {
+  const slides = document.querySelectorAll('.slide');
+  const dots   = document.querySelectorAll('.slide-dot');
+  if (!slides.length) return;
+  slides[slideIdx]?.classList.remove('active');
+  dots[slideIdx]?.classList.remove('active');
+  slideIdx = (idx + slides.length) % slides.length;
+  slides[slideIdx]?.classList.add('active');
+  dots[slideIdx]?.classList.add('active');
+  const counter = document.getElementById('slideCounter');
+  if (counter) counter.textContent = `${slideIdx+1} / ${slides.length}`;
+  clearInterval(slideshowTimer);
+  if (slides.length > 1) slideshowTimer = setInterval(nextSlide, 4000);
+}
+function nextSlide() { goSlide(slideIdx + 1); }
+function prevSlide() { goSlide(slideIdx - 1); }
+
 async function openPlayerModal(idx) {
   currentModalIdx = idx;
   const entry = found[idx];
   const meta  = entry._meta;
   activeSourceIdx = -1;
 
-  document.getElementById('playerTitle').textContent = `▶ ${meta.title}`;
-  document.getElementById('playerWrap').innerHTML = `<div class="player-placeholder"><span style="font-size:42px">▶</span><span>Selecione um servidor abaixo</span></div>`;
+  document.getElementById('playerTitle').textContent = `🎬 ${meta.title}`;
+  document.getElementById('playerTvPicker')?.remove();
+
+  startSlideshow(meta.slides||[], meta.title, meta.year, meta.rating);
 
   const list = document.getElementById('sourceList');
   list.innerHTML = '';
 
-  let tvPickerHtml = '';
-  if(meta.type==='tv'){
+  if (meta.type === 'tv') {
     const pickDiv = document.createElement('div');
     pickDiv.id = 'playerTvPicker';
     pickDiv.className = 'tv-picker';
@@ -898,18 +1011,14 @@ async function openPlayerModal(idx) {
         <button class="tv-load-btn">↺ CARREGAR LINKS</button>
       </div>
       <div class="tv-ep-name"></div>`;
-    // Insert before source list
-    document.getElementById('sourceList').before(pickDiv);
-
-    await buildTvPicker('playerTvPicker', meta, async(sn,en)=>{
-      await reloadTvStreams(idx,sn,en,'sourceList', (streams,container)=>{
-        renderSourceItems(streams);
-      });
+    list.before(pickDiv);
+    await buildTvPicker('playerTvPicker', meta, async (sn, en) => {
+      await reloadTvStreams(idx, sn, en, 'sourceList', (streams) => renderSourceItems(streams));
     });
   }
 
   renderSourceItems(entry.streams);
-  document.getElementById('playerModal').style.display='flex';
+  document.getElementById('playerModal').style.display = 'flex';
 }
 
 function renderSourceItems(streams){
@@ -936,33 +1045,38 @@ function guessFormat(url){
   return 'STREAM';
 }
 
-function playSource(idx, url, name) {
+function renderSourceItems(streams) {
+  const list = document.getElementById('sourceList');
+  list.querySelectorAll('.source-item').forEach(el => el.remove());
+  streams.forEach((s, i) => {
+    const url  = s.url || s.externalUrl || '';
+    const name = s.title || s.name || `Servidor ${i + 1}`;
+    if (!url) return;
+    const item = document.createElement('div');
+    item.className = 'source-item';
+    item.id = `src-${i}`;
+    item.innerHTML = `
+      <div class="source-dot"></div>
+      <span>${name}</span>
+      <span class="source-fmt">${guessFormat(url)}</span>
+      <a href="${url}" target="_blank" rel="noopener"
+         style="margin-left:8px;color:#000;background:var(--cyan);font-family:'VT323',monospace;
+                font-size:13px;letter-spacing:1px;padding:3px 10px;text-decoration:none;
+                white-space:nowrap;flex-shrink:0;"
+         onclick="setActive(${i})">▶ ABRIR</a>`;
+    list.appendChild(item);
+  });
+}
+
+function setActive(idx) {
   document.getElementById(`src-${activeSourceIdx}`)?.classList.remove('active');
   activeSourceIdx = idx;
   document.getElementById(`src-${idx}`)?.classList.add('active');
+}
 
-  const wrap = document.getElementById('playerWrap');
-  const mime = getVideoMime(url);
-
-  wrap.innerHTML = `
-    <video id="mainVideo" controls autoplay style="width:100%;height:100%;background:#000">
-      <source src="${url}" type="${mime}">
-    </video>`;
-
-  const video = wrap.querySelector('#mainVideo');
-  if (video) {
-    video.onerror = () => {
-      wrap.innerHTML = `
-        <div class="player-placeholder">
-          <span style="font-size:28px">🔗</span>
-          <span style="font-size:13px;text-align:center;padding:0 20px">Servidor bloqueia reprodução embutida</span>
-          <a href="${url}" target="_blank" rel="noopener"
-             style="color:var(--cyan);font-size:16px;margin-top:8px;font-family:'VT323',monospace;letter-spacing:2px;text-decoration:none;">
-            ▶ ABRIR NO NAVEGADOR
-          </a>
-        </div>`;
-    };
-  }
+function playSource(idx, url, name) {
+  setActive(idx);
+  window.open(url, '_blank', 'noopener');
 }
 
 function getVideoMime(url){
@@ -975,10 +1089,11 @@ function getVideoMime(url){
 }
 
 function stopPlayer(){
-  document.getElementById('playerWrap').innerHTML=`<div class="player-placeholder"><span style="font-size:42px">▶</span><span>Selecione um servidor abaixo</span></div>`;
-  // Remove TV picker if present
+  clearInterval(slideshowTimer);
+  slideshowTimer = null;
+  document.getElementById('playerWrap').innerHTML = '';
   document.getElementById('playerTvPicker')?.remove();
-  activeSourceIdx=-1;
+  activeSourceIdx = -1;
 }
 
 /* ══ DOWNLOADS ══ */
