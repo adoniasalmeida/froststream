@@ -580,48 +580,50 @@ async function processItem(item,type,apiKey){
 /* ══ RENDER QUEUE / LOAD MORE ══ */
 function addToQueue(entry){
   renderQueue.push(entry);
-  const perPage=parseInt(document.getElementById('perPage').value)||20;
-  // render immediately if within current batch
-  if(renderQueue.length<=renderOffset+perPage){
-    renderCard(entry, renderQueue.length-1);
+  const perPage = parseInt(document.getElementById('perPage').value) || 20;
+  // Render immediately only if we haven't hit the perPage limit yet
+  if(renderQueue.length <= perPage){
+    renderCard(entry, found.length - 1);
+    renderOffset = renderQueue.length;
   }
   updateLoadMore();
 }
 
 function renderNextBatch(){
-  const perPage=parseInt(document.getElementById('perPage').value)||20;
-  const start=renderOffset;
-  const end=Math.min(renderOffset+perPage, renderQueue.length);
-  for(let i=start;i<end;i++) renderCard(renderQueue[i],i);
-  renderOffset=end;
+  const perPage = parseInt(document.getElementById('perPage').value) || 20;
+  const end = Math.min(renderOffset + perPage, renderQueue.length);
+  for(let i = renderOffset; i < end; i++){
+    // idx in found[] matches renderQueue[] since they're added in same order
+    renderCard(renderQueue[i], i);
+  }
+  renderOffset = end;
   updateLoadMore();
 }
 
 function updateLoadMore(){
-  const perPage=parseInt(document.getElementById('perPage').value)||20;
-  const remaining=renderQueue.length-renderOffset;
-  const wrap=document.getElementById('loadMoreWrap');
-  if(remaining>0){
-    wrap.style.display='block';
-    document.getElementById('loadMoreCount').textContent=`(${remaining} restantes)`;
+  const remaining = renderQueue.length - renderOffset;
+  const wrap = document.getElementById('loadMoreWrap');
+  if(remaining > 0){
+    wrap.style.display = 'block';
+    document.getElementById('loadMoreCount').textContent = `(${remaining} restantes)`;
   } else {
-    wrap.style.display='none';
+    wrap.style.display = 'none';
   }
 }
 
-function renderCard(entry,idx){
-  const meta=entry._meta;
-  const count=entry.streams.length;
-  const div=document.createElement('div');
-  div.className='card';
-  const posterHtml=meta.poster
-    ?`<img class="poster" src="${meta.poster}" alt="${meta.title}" loading="lazy">`
-    :`<div class="no-poster">[ SEM POSTER ]</div>`;
-  div.innerHTML=`
+function renderCard(entry, idx){
+  const meta  = entry._meta;
+  const count = entry.streams.length;
+  const div   = document.createElement('div');
+  div.className = 'card';
+  const posterHtml = meta.poster
+    ? `<img class="poster" src="${meta.poster}" alt="${meta.title}" loading="lazy">`
+    : `<div class="no-poster">[ SEM POSTER ]</div>`;
+  div.innerHTML = `
     <div class="poster-wrap">${posterHtml}</div>
     <div class="card-title-bar">
       <div class="card-title">${meta.title}</div>
-      ${meta.year?`<div class="card-year">${meta.year}</div>`:''}
+      ${meta.year ? `<div class="card-year">${meta.year}</div>` : ''}
     </div>
     <div class="card-imdb">${meta.imdb}</div>
     <div class="card-actions">
@@ -637,8 +639,6 @@ function renderCard(entry,idx){
       </button>
     </div>`;
   document.getElementById('results').appendChild(div);
-  // Update renderOffset to track what's visible
-  if(idx>=renderOffset) renderOffset=idx+1;
 }
 
 /* ══ MODALS ══ */
@@ -936,30 +936,108 @@ function guessFormat(url){
   return 'STREAM';
 }
 
-function playSource(idx,url,name){
+async function resolveUrl(url) {
+  // Try each proxy to follow redirects and get the final URL
+  // allorigins returns the final URL after redirects in the response URL
+  const proxyFns = [
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.dev/?url=${encodeURIComponent(u)}`,
+  ];
+
+  for (const fn of proxyFns) {
+    try {
+      const res = await fetch(fn(url), {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        // If proxy returned a blob/data url or the response url differs, use it
+        const finalUrl = res.url;
+        // Strip proxy prefix to get real redirected URL if possible
+        if (finalUrl && !finalUrl.includes('corsproxy') && !finalUrl.includes('allorigins')) {
+          return finalUrl;
+        }
+        // Otherwise return proxied URL directly for the video tag
+        return fn(url);
+      }
+    } catch(_) {}
+  }
+
+  // Fallback: return original
+  return url;
+}
+
+async function playSource(idx, url, name) {
   document.getElementById(`src-${activeSourceIdx}`)?.classList.remove('active');
-  activeSourceIdx=idx;
+  activeSourceIdx = idx;
   document.getElementById(`src-${idx}`)?.classList.add('active');
-  const wrap=document.getElementById('playerWrap');
-  const isNative=/\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(url)||url.includes('m3u8');
-  wrap.innerHTML=isNative
-    ?`<video controls autoplay style="width:100%;height:100%;background:#000">
+
+  const wrap = document.getElementById('playerWrap');
+
+  // Show loading state
+  wrap.innerHTML = `
+    <div class="player-placeholder">
+      <span style="font-size:28px;animation:blink 1s step-end infinite">◈</span>
+      <span>Resolvendo stream...</span>
+    </div>`;
+
+  // Resolve redirect to get final playable URL
+  let finalUrl = url;
+  try {
+    finalUrl = await resolveUrl(url);
+  } catch(_) { finalUrl = url; }
+
+  const isNative = /\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(finalUrl)
+    || finalUrl.includes('m3u8')
+    || /\.(mp4|webm|ogg|m3u8|ts)(\?|$)/i.test(url)
+    || url.includes('m3u8');
+
+  if (isNative) {
+    wrap.innerHTML = `
+      <video controls autoplay style="width:100%;height:100%;background:#000">
+        <source src="${finalUrl}" type="${getVideoMime(finalUrl || url)}">
         <source src="${url}" type="${getVideoMime(url)}">
         <p style="color:#fff;padding:20px;font-family:'Share Tech Mono',monospace;font-size:11px">
-          Formato não suportado. <a href="${url}" target="_blank" style="color:var(--cyan)">Abrir externamente →</a>
+          Formato não suportado diretamente.
+          <a href="${url}" target="_blank" style="color:var(--cyan)">Abrir no navegador →</a>
         </p>
-       </video>`
-    :`<div class="player-placeholder">
+      </video>`;
+
+    // If video errors out, show external link fallback
+    const video = wrap.querySelector('video');
+    if (video) {
+      video.onerror = () => {
+        wrap.innerHTML = `
+          <div class="player-placeholder">
+            <span style="font-size:28px">🔗</span>
+            <span>Stream bloqueado pelo servidor</span>
+            <a href="${url}" target="_blank" rel="noopener"
+               style="color:var(--cyan);font-size:14px;margin-top:6px;font-family:'VT323',monospace;letter-spacing:2px">
+              ABRIR NO NAVEGADOR →
+            </a>
+          </div>`;
+      };
+    }
+  } else {
+    wrap.innerHTML = `
+      <div class="player-placeholder">
         <span style="font-size:32px">🔗</span>
         <span>Servidor requer abertura externa</span>
-        <a href="${url}" target="_blank" rel="noopener" style="color:var(--cyan);font-size:14px;margin-top:6px;font-family:'VT323',monospace;letter-spacing:2px">ABRIR ${name} →</a>
-       </div>`;
+        <a href="${url}" target="_blank" rel="noopener"
+           style="color:var(--cyan);font-size:14px;margin-top:6px;font-family:'VT323',monospace;letter-spacing:2px">
+          ABRIR ${name} →
+        </a>
+      </div>`;
+  }
 }
 
 function getVideoMime(url){
-  if(url.includes('m3u8'))return 'application/x-mpegURL';
-  if(/\.mp4/i.test(url))return 'video/mp4';
-  if(/\.webm/i.test(url))return 'video/webm';
+  if(!url) return 'video/mp4';
+  if(url.includes('m3u8'))  return 'application/x-mpegURL';
+  if(/\.mp4/i.test(url))   return 'video/mp4';
+  if(/\.webm/i.test(url))  return 'video/webm';
+  if(/\.ts/i.test(url))    return 'video/MP2T';
   return 'video/mp4';
 }
 
