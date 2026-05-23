@@ -141,8 +141,9 @@ select option{background:#0e0e1c;}
 .card-title-bar{padding:10px 12px 2px;}
 .card-title{font-family:'VT323',monospace;font-size:18px;color:#e0e0ff;line-height:1.25;letter-spacing:.5px;}
 .card-year{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);margin-top:1px;}
-.card-imdb{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);padding:2px 12px 10px;}
+/* card badges on poster */
 .stream-badge{position:absolute;top:8px;right:8px;background:var(--pink);color:#fff;font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;border-radius:20px;padding:2px 7px;line-height:1.5;}
+.rating-badge{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.7);color:var(--yellow);font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.5px;}
 
 /* ── LOAD MORE ── */
 .load-more-wrap{text-align:center;margin-top:24px;}
@@ -163,8 +164,14 @@ select option{background:#0e0e1c;}
 
 /* modal image hero */
 .modal-hero{position:relative;width:100%;height:200px;overflow:hidden;background:#0a0a18;flex-shrink:0;}
-.modal-hero img{width:100%;height:100%;object-fit:cover;display:block;filter:brightness(.8);}
-.modal-hero-grad{position:absolute;inset:0;background:linear-gradient(to bottom,transparent 60%,var(--panel) 100%);}
+.modal-hero img{width:100%;height:100%;object-fit:cover;display:block;filter:brightness(1);}
+.modal-hero-grad{position:absolute;inset:0;background:linear-gradient(to bottom,transparent 80%,var(--panel) 100%);}
+
+/* card poster overlay — only dims slightly on hover */
+.poster-overlay{position:absolute;inset:0;background:rgba(7,7,15,0);display:flex;align-items:center;justify-content:center;transition:background .25s;}
+.card:hover .poster-overlay{background:rgba(7,7,15,.4);}
+.poster-overlay-icon{font-size:38px;opacity:0;transform:scale(.7);transition:opacity .25s,transform .25s;}
+.card:hover .poster-overlay-icon{opacity:1;transform:scale(1);}
 
 /* modal tabs */
 .modal-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--panel2);}
@@ -319,7 +326,6 @@ select option{background:#0e0e1c;}
       <div class="btn-group">
         <button class="action-btn btn-scan" id="btnScan" onclick="startScan()">▶ SCAN</button>
         <button class="action-btn btn-stop" id="btnStop" onclick="stopScan()" style="display:none;">■ PARAR</button>
-        <button class="action-btn btn-clear" onclick="clearResults()">✕ LIMPAR</button>
         <button class="action-btn btn-zip"  onclick="downloadZip()">⬇ ZIP</button>
         <button class="action-btn btn-m3u"  onclick="downloadM3U()">📺 M3U / IPTV</button>
       </div>
@@ -617,17 +623,18 @@ function renderCard(entry,idx){
   const div=document.createElement('div');div.className='card';
   div.onclick=()=>openTitleModal(idx);
   const posterHtml=meta.poster?`<img class="poster" src="${meta.poster}" alt="${meta.title}" loading="lazy">`:`<div class="no-poster">[ SEM POSTER ]</div>`;
+  const ratingHtml=meta.rating!=='—'?`<span class="rating-badge">⭐ ${meta.rating}</span>`:'';
   div.innerHTML=`
     <div class="poster-wrap">
       ${posterHtml}
       <div class="poster-overlay"><span class="poster-overlay-icon">🎬</span></div>
       <span class="stream-badge">${count} links</span>
+      ${ratingHtml}
     </div>
     <div class="card-title-bar">
       <div class="card-title">${meta.title}</div>
       ${meta.year?`<div class="card-year">${meta.year}</div>`:''}
-    </div>
-    <div class="card-imdb">${meta.imdb}</div>`;
+    </div>`;
   document.getElementById('results').appendChild(div);
 }
 
