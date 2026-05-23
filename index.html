@@ -93,9 +93,13 @@ select option{background:#0e0e1c;}
 .action-btn{display:inline-flex;align-items:center;gap:7px;font-family:'Orbitron',monospace;font-size:11px;font-weight:700;letter-spacing:2px;padding:11px 18px;border:none;cursor:pointer;transition:filter .2s,transform .1s;white-space:nowrap;}
 .action-btn:active{transform:scale(.97);}
 .btn-scan{background:var(--cyan);color:#000;}
+.btn-stop{background:var(--pink);color:#fff;}
+.btn-clear{background:transparent;color:var(--dim);border:1px solid var(--border);}
 .btn-zip{background:var(--pink);color:#fff;}
 .btn-m3u{background:var(--yellow);color:#000;}
 .btn-scan:hover{filter:brightness(1.2) drop-shadow(0 0 8px var(--cyan));}
+.btn-stop:hover{filter:brightness(1.2) drop-shadow(0 0 8px var(--pink));}
+.btn-clear:hover{border-color:var(--dim);color:var(--text);}
 .btn-zip:hover{filter:brightness(1.2) drop-shadow(0 0 8px var(--pink));}
 .btn-m3u:hover{filter:brightness(1.15) drop-shadow(0 0 8px var(--yellow));}
 
@@ -182,12 +186,12 @@ select option{background:#0e0e1c;}
 .server-item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--cyan);padding:10px 12px;margin-bottom:8px;transition:background .15s;}
 .server-item:hover{background:rgba(0,255,231,.04);}
 .server-info{flex:1;overflow:hidden;}
-.server-name{font-family:'VT323',monospace;font-size:16px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.server-name{font-family:'VT323',monospace;font-size:16px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.5px;}
 .server-url{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;margin-top:2px;}
-.copy-btn{display:inline-flex;align-items:center;gap:4px;background:var(--border);border:none;color:var(--cyan);padding:5px 10px;font-family:'VT323',monospace;font-size:13px;letter-spacing:1px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background .15s,color .15s;}
+.copy-btn{display:inline-flex;align-items:center;gap:4px;background:var(--border);border:none;color:var(--cyan);padding:6px 12px;font-family:'VT323',monospace;font-size:14px;letter-spacing:1px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background .15s,color .15s;}
 .copy-btn:hover{background:var(--cyan);color:#000;}
 .copy-btn.copied{background:var(--green);color:#000;}
-.open-btn{display:inline-flex;align-items:center;gap:4px;background:var(--cyan);border:none;color:#000;padding:5px 10px;font-family:'VT323',monospace;font-size:13px;letter-spacing:1px;cursor:pointer;white-space:nowrap;flex-shrink:0;text-decoration:none;transition:filter .15s;margin-left:4px;}
+.open-btn{display:inline-flex;align-items:center;gap:4px;background:var(--cyan);border:none;color:#000;padding:6px 12px;font-family:'VT323',monospace;font-size:14px;letter-spacing:1px;cursor:pointer;white-space:nowrap;flex-shrink:0;text-decoration:none;transition:filter .15s;margin-left:4px;}
 .open-btn:hover{filter:brightness(1.15);}
 
 /* TV picker */
@@ -266,7 +270,7 @@ select option{background:#0e0e1c;}
 <div id="app">
   <div class="topbar">
     <div class="logo-sm">FROST<span>STREAM</span></div>
-    <div class="api-chip" onclick="showSplash()">
+    <div class="api-chip" onclick="forgetKey()">
       <div class="api-chip-dot"></div>API CONECTADA · TROCAR
     </div>
   </div>
@@ -313,7 +317,9 @@ select option{background:#0e0e1c;}
         </div>
       </div>
       <div class="btn-group">
-        <button class="action-btn btn-scan" onclick="startScan()">▶ SCAN</button>
+        <button class="action-btn btn-scan" id="btnScan" onclick="startScan()">▶ SCAN</button>
+        <button class="action-btn btn-stop" id="btnStop" onclick="stopScan()" style="display:none;">■ PARAR</button>
+        <button class="action-btn btn-clear" onclick="clearResults()">✕ LIMPAR</button>
         <button class="action-btn btn-zip"  onclick="downloadZip()">⬇ ZIP</button>
         <button class="action-btn btn-m3u"  onclick="downloadM3U()">📺 M3U / IPTV</button>
       </div>
@@ -398,8 +404,27 @@ function setProxyBadge(name){
   b.textContent=`via ${name}`;
 }
 
-let zip=new JSZip(),found=[],renderQueue=[],renderOffset=0,currentModalIdx=-1;
+let zip=new JSZip(),found=[],renderQueue=[],renderOffset=0,currentModalIdx=-1,scanAborted=false;
 const tvSeasonCache={};
+
+function setScanRunning(running){
+  document.getElementById('btnScan').style.display = running ? 'none' : '';
+  document.getElementById('btnStop').style.display = running ? '' : 'none';
+}
+
+function stopScan(){
+  scanAborted = true;
+  setScanRunning(false);
+  setStatus(`Scan interrompido — ${found.length} título(s) encontrado(s)`);
+}
+
+function clearResults(){
+  scanAborted = true;
+  setScanRunning(false);
+  resetResults();
+  setStatus('Aguardando...');
+  updateProgress(0);
+}
 
 /* ══ SPLASH ══ */
 function switchSplashTab(id,btn){
@@ -428,6 +453,17 @@ function loadJsonFile(file){
 }
 // drag and drop visual
 document.addEventListener('DOMContentLoaded',()=>{
+  // Load saved API key
+  try{
+    const saved = localStorage.getItem('froststream_apikey');
+    if(saved){
+      document.getElementById('splashKey').value = saved;
+      // Auto-enter if key already saved
+      enterApp();
+    }
+  }catch{}
+
+  // Drag and drop on dropzone
   const dz=document.getElementById('dropzone');
   if(!dz)return;
   dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
@@ -437,10 +473,19 @@ document.addEventListener('DOMContentLoaded',()=>{
 function enterApp(){
   const key=document.getElementById('splashKey').value.trim();
   if(!key){alert('Informe sua TMDB API KEY.');return;}
+  try{ localStorage.setItem('froststream_apikey', key); }catch{}
   document.getElementById('splash').style.animation='fadeOut .35s ease forwards';
   setTimeout(()=>{document.getElementById('splash').style.display='none';document.getElementById('app').style.display='block';updateSuggestions();},350);
 }
-function showSplash(){document.getElementById('splash').style.cssText='display:flex;animation:fadeIn .3s ease';document.getElementById('app').style.display='none';}
+function showSplash(){
+  document.getElementById('splash').style.cssText='display:flex;animation:fadeIn .3s ease';
+  document.getElementById('app').style.display='none';
+}
+function forgetKey(){
+  try{ localStorage.removeItem('froststream_apikey'); }catch{}
+  document.getElementById('splashKey').value='';
+  showSplash();
+}
 function getApiKey(){return document.getElementById('splashKey').value.trim();}
 
 /* ══ SUGGESTIONS ══ */
@@ -474,27 +519,32 @@ function updateSuggestions(){
 async function startScanEndpoint(endpoint,type){
   document.getElementById('type').value=type;updateSuggestions();resetResults();
   const apiKey=getApiKey();if(!apiKey){showSplash();return;}
+  scanAborted=false;setScanRunning(true);
   setStatus(`Carregando ${endpoint}...`);
   try{
     const data=await fetch(`https://api.themoviedb.org/3/${endpoint}?api_key=${apiKey}&language=pt-BR&page=1`).then(r=>r.json());
-    let p=0;for(const item of(data.results||[])){p++;updateProgress((p/20)*100);await processItem(item,type,apiKey);await delay(180);}
+    let p=0;for(const item of(data.results||[])){if(scanAborted)break;p++;updateProgress((p/20)*100);await processItem(item,type,apiKey);await delay(180);}
   }catch(e){console.warn(e);}
-  updateProgress(100);setStatus(`Scan finalizado — ${found.length} título(s) encontrado(s)`);
+  setScanRunning(false);
+  if(!scanAborted){updateProgress(100);setStatus(`Scan finalizado — ${found.length} título(s) encontrado(s)`);}
   if(!found.length)document.getElementById('emptyState').style.display='block';
 }
 async function startScan(){
   resetResults();const apiKey=getApiKey();if(!apiKey){showSplash();return;}
+  scanAborted=false;setScanRunning(true);
   const type=document.getElementById('type').value,name=document.getElementById('name').value.trim(),
         year=document.getElementById('year').value.trim(),genre=document.getElementById('genre').value;
   let p=0;
   for(let page=1;page<=2;page++){
+    if(scanAborted)break;
     const url=name?`https://api.themoviedb.org/3/search/${type}?api_key=${apiKey}&query=${encodeURIComponent(name)}&page=${page}&language=pt-BR`
       :type==='movie'?`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&with_genres=${genre}&primary_release_year=${year}&page=${page}&language=pt-BR&sort_by=popularity.desc`
       :`https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&with_genres=${genre}&first_air_date_year=${year}&page=${page}&language=pt-BR&sort_by=popularity.desc`;
     setStatus(`Escaneando página ${page}...`);
-    try{const data=await fetch(url).then(r=>r.json());for(const item of(data.results||[])){p++;updateProgress((p/40)*100);await processItem(item,type,apiKey);await delay(180);}}catch(e){console.warn(e);}
+    try{const data=await fetch(url).then(r=>r.json());for(const item of(data.results||[])){if(scanAborted)break;p++;updateProgress((p/40)*100);await processItem(item,type,apiKey);await delay(180);}}catch(e){console.warn(e);}
   }
-  updateProgress(100);setStatus(`Scan finalizado — ${found.length} título(s) encontrado(s)`);
+  setScanRunning(false);
+  if(!scanAborted){updateProgress(100);setStatus(`Scan finalizado — ${found.length} título(s) encontrado(s)`);}
   if(!found.length)document.getElementById('emptyState').style.display='block';
 }
 function resetResults(){
@@ -713,30 +763,44 @@ async function buildTvPicker(containerId,meta,onLoad){
 }
 
 /* ── SERVER ITEMS ── */
-function renderServerItems(streams,container){
-  const el=typeof container==='string'?document.getElementById(container):container;
-  if(!el)return;
-  el.querySelectorAll('.server-item').forEach(e=>e.remove());
-  streams.forEach((s,i)=>{
-    const url=s.url||s.externalUrl||'',name=s.title||s.name||`Servidor ${i+1}`;
-    const item=document.createElement('div');item.className='server-item';
-    item.innerHTML=`
+function renderServerItems(streams, container) {
+  const el = typeof container === 'string' ? document.getElementById(container) : container;
+  if (!el) return;
+  el.querySelectorAll('.stream-grid,.stream-card,.server-item').forEach(e => e.remove());
+  streams.forEach((s, i) => {
+    const url  = s.url || s.externalUrl || '';
+    const name = s.title || s.name || `Servidor ${i + 1}`;
+    const item = document.createElement('div');
+    item.className = 'server-item';
+    item.innerHTML = `
       <div class="server-info">
         <div class="server-name">◈ ${name}</div>
         <span class="server-url">${url||'(sem URL direta)'}</span>
       </div>
-      ${url?`<button class="copy-btn" data-url="${url.replace(/"/g,'&quot;')}">📋 COPIAR</button><a class="open-btn" href="${url}" target="_blank" rel="noopener">▶ ABRIR</a>`
-           :'<span style="font-size:12px;color:var(--dim);font-family:VT323,monospace">N/D</span>'}`;
-    item.querySelector('.copy-btn')?.addEventListener('click',function(){copyUrl(this,this.dataset.url);});
+      ${url
+        ? `<button class="copy-btn" data-url="${url.replace(/"/g,'&quot;')}">📋 COPIAR</button>
+           <a class="open-btn" href="${url}" target="_blank" rel="noopener">▶ ABRIR</a>`
+        : '<span style="font-size:12px;color:var(--dim);font-family:VT323,monospace">N/D</span>'
+      }`;
+    item.querySelector('.copy-btn')?.addEventListener('click', function () { copyUrl(this, this.dataset.url); });
     el.appendChild(item);
   });
 }
 
-function copyUrl(btn,url){
-  const fb=()=>{const ta=document.createElement('textarea');ta.value=url;ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');}catch{}document.body.removeChild(ta);};
-  const done=()=>{const p=btn.innerHTML;btn.innerHTML='✔ COPIADO';btn.classList.add('copied');setTimeout(()=>{btn.innerHTML=p;btn.classList.remove('copied');},2200);};
-  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(url).then(done).catch(()=>{fb();done();});
-  else{fb();done();}
+function copyUrl(btn, url) {
+  const fb = () => {
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); } catch {}
+    document.body.removeChild(ta);
+  };
+  const done = () => {
+    const p = btn.innerHTML; btn.innerHTML = '✔ COPIADO'; btn.classList.add('copied');
+    setTimeout(() => { btn.innerHTML = p; btn.classList.remove('copied'); }, 2200);
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(url).then(done).catch(() => { fb(); done(); });
+  else { fb(); done(); }
 }
 
 function guessFormat(url){if(url.includes('m3u8'))return 'HLS';if(/\.mp4/i.test(url))return 'MP4';if(/\.mkv/i.test(url))return 'MKV';if(/\.ts/i.test(url))return 'TS';return 'STREAM';}
